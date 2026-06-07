@@ -1,111 +1,46 @@
-import { anthropic } from "@ai-sdk/anthropic";
-import { streamText } from "ai";
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
+import Anthropic from "@anthropic-ai/sdk";
 
-interface ChatRequestBody {
-  userMessage?: string;
-  campaignId?: string;
-  playerId?: string;
-}
+const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
-function isValidString(v: any): v is string {
-  return typeof v === "string" && v.trim().length > 0;
-}
+export async function POST(req: NextRequest) {
+  const { userMessage, playerName, playerPower, playerClass } = await req.json();
 
-export async function POST(req: Request) {
-  try {
-    const body = (await req.json()) as ChatRequestBody;
+  const response = await client.messages.create({
+    model: "claude-opus-4-6",
+    max_tokens: 300,
+    system: `You are a Dungeon Master running a D&D-style adventure.
 
-    const userMessage = body?.userMessage;
+The player's character details are already set:
+- Name: ${playerName}
+- Power / Ability: ${playerPower}
+- Class: ${playerClass}
 
-    if (!isValidString(userMessage)) {
-      return NextResponse.json(
-        { error: "Invalid userMessage" },
-        { status: 400 }
-      );
-    }
+IMPORTANT RULES:
+- NEVER ask for character setup again. It is already done.
+- NEVER say "Before we begin" or ask for name/age/appearance.
+- Always start your message with "DM:" for narration.
+- If the player greets you (says hi, hello, hey etc.), warmly greet them back by name, give one sentence about their class and power, then ask if they are ready to begin their adventure. Do NOT start the adventure yet.
+- Only start the adventure after the player confirms they are ready.
+- Scene descriptions must be ONE short sentence only. Never more.
+- When ANY character speaks, format it EXACTLY like this:
+    Mysterious Figure: So you dare enter my domain...
+    Old Merchant: I have just the thing for you, traveler.
+  Use the character's actual name or title.
+- Keep responses short, punchy, and immersive.
+- The world feels FREE — never offer choices for investigation or conversation. Player decides.
+- ONLY offer numbered choices at a clear physical fork like branching paths or multiple doors.
+- Never ask "What do you do?" — just react to what the player says.`,
 
-    const result = streamText({
-      model: anthropic("claude-sonnet-4-20250514"),
+    messages: [
+      { role: "user", content: userMessage },
+    ],
+  });
 
-      system: `
-You are a Dungeon Master for a fantasy RPG game.
+  const text = response.content
+    .filter((b): b is Anthropic.TextBlock => b.type === "text")
+    .map((b) => b.text)
+    .join("\n");
 
-========================
-🔥 MODE SYSTEM
-========================
-
-1. GREETING / INTRO MODE (VERY IMPORTANT)
-If the user message is something like:
-- "hi"
-- "hello"
-- "hey"
-- "start"
-- any casual greeting
-
-THEN DO NOT start the story.
-
-Instead respond in this format:
-
-DM: Hello traveler… are you ready?
-
-DM: Before we begin, tell me:
-
-- Character Name:
-- Age:
-- Power / Ability:
-- Appearance (optional):
-
-Wait for user response before starting the adventure.
-
-========================
-2. STORY MODE (NORMAL GAMEPLAY)
-========================
-
-After character info is given, switch to RPG mode:
-
-RULES:
-- Keep narration SHORT (1–2 lines max)
-- Focus on dialogue
-- Use NPC speaker labels
-
-NPC FORMAT:
-Bob: Hello traveler.
-
-Mage: Be careful.
-
-STRUCTURE:
-[short scene line]
-
-NPC: dialogue
-
-Player: dialogue
-
-========================
-3. STYLE RULES
-========================
-- Use Markdown
-- No long paragraphs
-- No excessive environment descriptions
-- Focus on interaction and choices
-      `,
-
-      messages: [
-        {
-          role: "user",
-          content: userMessage,
-        },
-      ],
-    });
-
-    return result.toTextStreamResponse();
-  } catch (err) {
-    return NextResponse.json(
-      {
-        error: "Server error",
-        details: String(err),
-      },
-      { status: 500 }
-    );
-  }
+  return NextResponse.json({ text });
 }
